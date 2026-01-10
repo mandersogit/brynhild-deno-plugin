@@ -1,0 +1,488 @@
+#!/bin/bash
+# -*- mode: python -*-
+# vim: set ft=python:
+# Polyglot bash/python script - bash delegates to venv python
+"true" '''\'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+exec "$PROJECT_ROOT/local.venv/bin/python" "$0" "$@"
+'''
+
+"""
+Bundle source files into a markdown document.
+
+Usage:
+    bundle-sources -o OUTPUT FILES...
+    bundle-sources -o OUTPUT --glob PATTERN
+    bundle-sources -o OUTPUT -t TITLE FILES...
+    bundle-sources -o OUTPUT --include-workflow FILES...
+
+Examples:
+    # Bundle the main plugin code
+    bundle-sources -o workflow/plugin-source.md brynhild_deno_plugin/
+
+    # Bundle with a title
+    bundle-sources -o workflow/tests-source.md -t "Test Suite" tests/
+
+    # Bundle using glob pattern
+    bundle-sources -o workflow/all-python.md --glob "**/*.py"
+
+    # Include workflow folder (normally excluded)
+    bundle-sources -o /tmp/full-project.md --include-workflow --glob "**/*.py"
+
+Output Format:
+    # {Title}
+
+    ## `{relative/path/to/file.py}`
+
+    ```python
+    {file contents}
+    ```
+
+Note:
+    By default, the workflow/ directory is excluded (it's gitignored).
+    Use --include-workflow to include it.
+"""
+
+import argparse as _argparse
+import pathlib as _pathlib
+import sys as _sys
+
+
+# Directories to exclude by default
+DEFAULT_EXCLUDES = {
+    "workflow",
+    "local.venv",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".git",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "coverage_html",
+    "node_modules",
+    "dist",
+    "build",
+    "*.egg-info",
+    "packages",  # Empty pyodide packages directory
+}
+
+# Large vendored files - include as metadata reference, not content
+VENDORED_LARGE_FILES = {
+    "pyodide.asm.js",      # ~1MB minified WebAssembly glue
+    "pyodide.js",          # ~14KB minified Pyodide API
+    "pyodide.mjs",         # ~14KB minified Pyodide API (ESM)
+    "pyodide-lock.json",   # ~114KB package manifest
+}
+
+# File extensions to include (non-binary source/config files)
+SOURCE_EXTENSIONS = {
+    ".py",
+    ".ts",
+    ".js",
+    ".mjs",
+    ".d.ts",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".toml",
+    ".md",
+    ".mdc",
+    ".sh",
+    ".bash",
+    ".txt",
+    ".html",
+    ".css",
+    ".sql",
+    ".xml",
+    ".rst",
+}
+
+# Binary files to always skip
+BINARY_EXTENSIONS = {
+    ".wasm",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".pdf",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".dylib",
+    ".dll",
+    ".exe",
+}
+
+
+def get_language(path: _pathlib.Path) -> str:
+    """Determine the language tag for a file based on extension."""
+    suffix_map = {
+        ".py": "python",
+        ".yaml": "yaml",
+        ".yml": "yaml",
+        ".json": "json",
+        ".md": "markdown",
+        ".toml": "toml",
+        ".sh": "bash",
+        ".bash": "bash",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".sql": "sql",
+        ".html": "html",
+        ".css": "css",
+        ".xml": "xml",
+        ".txt": "text",
+        ".rst": "rst",
+        ".mjs": "javascript",
+        ".d.ts": "typescript",
+        ".mdc": "markdown",
+    }
+    # Check compound extensions first
+    if path.name.endswith(".d.ts"):
+        return "typescript"
+    return suffix_map.get(path.suffix.lower(), "text")
+
+
+def should_exclude(path: _pathlib.Path, excludes: set[str]) -> bool:
+    """Check if a path should be excluded based on exclude patterns."""
+    import fnmatch as _fnmatch
+
+    for part in path.parts:
+        if part in excludes:
+            return True
+        # Handle glob-style patterns like *.egg-info
+        for pattern in excludes:
+            if "*" in pattern:
+                if _fnmatch.fnmatch(part, pattern):
+                    return True
+    return False
+
+
+def is_large_vendored_file(path: _pathlib.Path) -> bool:
+    """Check if this is a large vendored file that should get metadata instead of content."""
+    return path.name in VENDORED_LARGE_FILES
+
+
+def get_vendored_file_metadata(path: _pathlib.Path, project_root: _pathlib.Path) -> str:
+    """Generate metadata block for a large vendored file."""
+    import hashlib as _hashlib
+    import json as _json
+
+    rel_path = make_relative_path(path, project_root)
+    stat = path.stat()
+    size_kb = stat.st_size / 1024
+
+    # Calculate SHA256
+    sha256 = _hashlib.sha256(path.read_bytes()).hexdigest()
+
+    # Try to get version info from nearby package.json
+    version_info = {}
+    package_json = path.parent / "package.json"
+    if package_json.exists():
+        try:
+            pkg = _json.loads(package_json.read_text())
+            version_info["version"] = pkg.get("version", "unknown")
+            version_info["name"] = pkg.get("name", "unknown")
+        except Exception:
+            pass
+
+    # Try to get Python version from pyodide-lock.json
+    lock_json = path.parent / "pyodide-lock.json"
+    if lock_json.exists():
+        try:
+            lock = _json.loads(lock_json.read_text())
+            info = lock.get("info", {})
+            version_info["pyodide_version"] = info.get("version", "unknown")
+            version_info["python_version"] = info.get("python", "unknown")
+            version_info["platform"] = info.get("platform", "unknown")
+        except Exception:
+            pass
+
+    # Build description based on file type
+    descriptions = {
+        "pyodide.asm.js": "WebAssembly JavaScript glue code (minified, machine-generated)",
+        "pyodide.js": "Pyodide API loader (minified)",
+        "pyodide.mjs": "Pyodide API loader - ES module version (minified)",
+        "pyodide-lock.json": "Package manifest with available Pyodide packages (minified JSON)",
+    }
+    description = descriptions.get(path.name, "Vendored file")
+
+    # Build the metadata block
+    lines = [
+        f"**File**: `{rel_path}`",
+        f"**Size**: {size_kb:.1f} KB",
+        f"**SHA256**: `{sha256[:16]}...{sha256[-16:]}`",
+        f"**Description**: {description}",
+        "",
+    ]
+
+    if version_info:
+        lines.append("**Provenance**:")
+        if "name" in version_info:
+            lines.append(f"- Package: {version_info['name']}")
+        if "version" in version_info:
+            lines.append(f"- Version: {version_info['version']}")
+        if "pyodide_version" in version_info:
+            lines.append(f"- Pyodide: {version_info['pyodide_version']}")
+        if "python_version" in version_info:
+            lines.append(f"- Python: {version_info['python_version']}")
+        if "platform" in version_info:
+            lines.append(f"- Platform: {version_info['platform']}")
+        lines.append(f"- Origin: https://github.com/pyodide/pyodide/releases")
+        lines.append("")
+
+    lines.append("*Content omitted (minified/machine-generated). Review source at origin.*")
+
+    return "\n".join(lines)
+
+
+def is_source_file(path: _pathlib.Path) -> bool:
+    """Check if a file is a source/config file (not binary)."""
+    # Large vendored files are handled specially (metadata only)
+    # but we still want to "include" them
+    if is_large_vendored_file(path):
+        return True
+
+    # Skip binary files
+    if path.suffix.lower() in BINARY_EXTENSIONS:
+        return False
+
+    # Check for known source extensions
+    suffix = path.suffix.lower()
+    if suffix in SOURCE_EXTENSIONS:
+        return True
+
+    # Special case: .d.ts files
+    if path.name.endswith(".d.ts"):
+        return True
+
+    # Files without extension - check if they look like scripts
+    if not suffix:
+        # Check first line for shebang or known patterns
+        try:
+            with open(path, "rb") as f:
+                first_bytes = f.read(100)
+                # Skip if it looks binary
+                if b"\x00" in first_bytes:
+                    return False
+                # Include if it has a shebang
+                if first_bytes.startswith(b"#!"):
+                    return True
+        except (OSError, PermissionError):
+            return False
+
+    return False
+
+
+def make_relative_path(path: _pathlib.Path, project_root: _pathlib.Path) -> str:
+    """Make a path relative to the project root if possible."""
+    try:
+        return str(path.relative_to(project_root))
+    except ValueError:
+        return str(path)
+
+
+def bundle_files(
+    files: list[_pathlib.Path],
+    output: _pathlib.Path,
+    title: str | None,
+    project_root: _pathlib.Path,
+) -> None:
+    """Bundle source files into a markdown document."""
+    lines: list[str] = []
+
+    # Title
+    if title:
+        lines.append(f"# {title}")
+    else:
+        # Generate title from output filename
+        stem = output.stem.replace("-", " ").replace("_", " ").title()
+        lines.append(f"# {stem}")
+    lines.append("")
+
+    # Process each file
+    bundled_count = 0
+    metadata_count = 0
+    for file_path in sorted(files):
+        if not file_path.exists():
+            print(f"Warning: file not found: {file_path}", file=_sys.stderr)
+            continue
+
+        if not file_path.is_file():
+            print(f"Warning: not a file: {file_path}", file=_sys.stderr)
+            continue
+
+        rel_path = make_relative_path(file_path, project_root)
+
+        # Handle large vendored files specially - metadata only
+        if is_large_vendored_file(file_path):
+            lines.append(f"## `{rel_path}` (metadata only)")
+            lines.append("")
+            lines.append(get_vendored_file_metadata(file_path, project_root))
+            lines.append("")
+            metadata_count += 1
+            continue
+
+        language = get_language(file_path)
+
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            print(f"Warning: cannot read {file_path}: {e}", file=_sys.stderr)
+            continue
+
+        # Remove trailing whitespace from each line, but preserve file structure
+        content_lines = content.rstrip().split("\n")
+        content = "\n".join(line.rstrip() for line in content_lines)
+
+        lines.append(f"## `{rel_path}`")
+        lines.append("")
+        lines.append(f"```{language}")
+        lines.append(content)
+        lines.append("```")
+        lines.append("")
+        bundled_count += 1
+
+    # Write output
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\n".join(lines), encoding="utf-8")
+
+    total = bundled_count + metadata_count
+    if metadata_count:
+        print(f"Bundled {bundled_count} files + {metadata_count} metadata refs ({total} total) -> {output}")
+    else:
+        print(f"Bundled {bundled_count} files -> {output}")
+
+
+def resolve_files(
+    file_args: list[str],
+    glob_pattern: str | None,
+    project_root: _pathlib.Path,
+    excludes: set[str],
+) -> list[_pathlib.Path]:
+    """Resolve file arguments and glob patterns to a list of paths."""
+    files: list[_pathlib.Path] = []
+
+    def add_file(f: _pathlib.Path) -> None:
+        """Add a file if it passes filters."""
+        try:
+            rel = f.relative_to(project_root)
+        except ValueError:
+            rel = f
+
+        if should_exclude(rel, excludes):
+            return
+        if not f.is_file():
+            return
+        if not is_source_file(f):
+            return
+        files.append(f)
+
+    if glob_pattern:
+        # Use glob from project root
+        for f in sorted(project_root.glob(glob_pattern)):
+            add_file(f)
+    else:
+        for arg in file_args:
+            path = _pathlib.Path(arg)
+            if not path.is_absolute():
+                path = project_root / path
+
+            if "*" in arg or "?" in arg:
+                # Treat as glob pattern
+                for f in sorted(project_root.glob(arg)):
+                    add_file(f)
+            elif path.is_dir():
+                # Add ALL source files in directory recursively
+                for f in sorted(path.rglob("*")):
+                    add_file(f)
+            else:
+                add_file(path)
+
+    # Deduplicate while preserving order
+    seen: set[_pathlib.Path] = set()
+    unique: list[_pathlib.Path] = []
+    for f in files:
+        resolved = f.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(f)
+
+    return unique
+
+
+def main() -> int:
+    """Main entry point."""
+    parser = _argparse.ArgumentParser(
+        description="Bundle source files into a markdown document.",
+        formatter_class=_argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "-o", "--output",
+        type=_pathlib.Path,
+        required=True,
+        help="Output markdown file path",
+    )
+    parser.add_argument(
+        "-t", "--title",
+        type=str,
+        default=None,
+        help="Document title (default: derived from output filename)",
+    )
+    parser.add_argument(
+        "--glob",
+        type=str,
+        default=None,
+        help="Glob pattern to match files (relative to project root)",
+    )
+    parser.add_argument(
+        "--include-workflow",
+        action="store_true",
+        help="Include workflow/ directory (excluded by default)",
+    )
+    parser.add_argument(
+        "files",
+        nargs="*",
+        help="Files or directories to bundle (supports glob patterns)",
+    )
+
+    args = parser.parse_args()
+
+    # Find project root (parent of scripts/)
+    script_path = _pathlib.Path(__file__).resolve()
+    project_root = script_path.parent.parent
+
+    # Build exclude set
+    excludes = DEFAULT_EXCLUDES.copy()
+    if not args.include_workflow:
+        excludes.add("workflow")
+    else:
+        excludes.discard("workflow")
+
+    # Resolve files
+    files = resolve_files(args.files, args.glob, project_root, excludes)
+
+    if not files:
+        print("Error: no files specified or matched", file=_sys.stderr)
+        return 1
+
+    # Make output path absolute if needed
+    output = args.output
+    if not output.is_absolute():
+        output = project_root / output
+
+    bundle_files(files, output, args.title, project_root)
+    return 0
+
+
+if __name__ == "__main__":
+    _sys.exit(main())
+
