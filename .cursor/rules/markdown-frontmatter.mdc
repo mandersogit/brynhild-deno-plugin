@@ -47,7 +47,8 @@ status: discussion
 This document describes...
 ```
 
-## Exceptions
+## No Exceptions
 
-- `README.md` files may omit frontmatter (they serve as directory indices)
-- `CHANGELOG.md` and `CONTRIBUTING.md` at repo root may omit frontmatter
+All markdown files require frontmatter. No exceptions.
+
+You might think that top-level files like README.md or CONTRIBUTING.md might be exceptions, but they are not. The github markdown parser should handle these fine with included frontmatter.
