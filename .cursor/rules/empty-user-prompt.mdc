@@ -1,0 +1,4 @@
+---
+alwaysApply: true
+---
+When you see an empty user prompt, and you don't know why, say "I saw an emtpy input. I assume that was a manual context summarization."

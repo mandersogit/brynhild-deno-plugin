@@ -1,0 +1,91 @@
+---
+alwaysApply: true
+---
+
+# Workflow Folder Rule
+
+## Rule: All AI-Generated Documentation Goes in `workflow/`
+
+When creating documentation, plans, status reports, or tracking files, **always place them in the `workflow/` folder**.
+
+### Files That MUST Go in `workflow/`
+
+- Status reports and progress updates
+- Development plans and roadmaps
+- Architecture notes and design documents
+- Task tracking and TODO lists
+- Meeting notes or conversation summaries
+- Analysis documents
+- Any `.md` file that isn't a standard project file (like README.md)
+
+### Correct Examples
+
+```
+✅ workflow/python-port-roadmap.md
+✅ workflow/status-2024-01-15.md
+✅ workflow/tool-analysis.md
+✅ workflow/phase-1-notes.md
+```
+
+### Incorrect Examples
+
+```
+❌ PLAN.md (root level)
+❌ STATUS.md (root level)
+❌ notes.md (root level)
+❌ TODO.md (root level)
+```
+
+### Exceptions (OK at root level)
+
+- `README.md` - Standard project readme
+- `CHANGELOG.md` - Release changelog
+- `CONTRIBUTING.md` - Contribution guidelines
+- `LICENSE` / `LICENSE.md` - License file
+
+### Why This Rule Exists
+
+1. Keeps the project root clean and professional
+2. All AI-generated working documents are in one place
+3. Easy to find project context and history
+4. Clear separation between project files and development artifacts
+
+### Git Tracking
+
+The `workflow/` folder is **gitignored from the main repo** but may be tracked as its own mini-repo for personal/internal use.
+
+### Commit Plans Structure
+
+```
+workflow/
+├── commit-plans/              # Plans for MAIN repo commits
+│   └── 2026-01-10-feature.yaml
+├── commit-plans-workflow/     # Plans for WORKFLOW repo commits
+│   └── 2026-01-10-notes.yaml
+├── *.md                       # Planning docs, status, notes
+└── prototype/                 # Reference materials
+```
+
+### Committing to the Workflow Repo
+
+When creating commit plans for the workflow mini-repo, use the `repo:` feature to target the workflow directory. This lets you run commit-helper from the project root:
+
+```yaml
+# workflow/commit-plans-workflow/2026-01-10-example.yaml
+repo: workflow
+
+commits:
+  - message: |
+      docs: add implementation notes
+    files:
+      - 2026-01-10-notes.md
+```
+
+Execute from project root:
+```bash
+./scripts/commit-helper.py workflow/commit-plans-workflow/2026-01-10-example.yaml --execute
+```
+
+**Do NOT** `cd workflow` and run commit-helper from there — always use `repo: workflow` and run from project root.
+
+See `.cursor/rules/commit-plans.mdc` for full commit plan format.

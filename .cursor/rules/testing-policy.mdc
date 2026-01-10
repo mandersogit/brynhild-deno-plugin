@@ -1,0 +1,173 @@
+---
+description: Testing policy - all tests must be honest and non-trivial
+globs:
+  - "**/*.py"
+alwaysApply: false
+---
+# Testing Policy
+
+
+## Core Principles
+
+Every test must be:
+
+1. **Honest** - Tests what it claims to test, not something weaker
+2. **Non-trivial** - Provides meaningful verification, not just "doesn't crash"
+
+## Forbidden Test Patterns
+
+### 1. Dishonest Tests
+
+Tests that claim to verify behavior but actually test something weaker:
+
+```python
+# ❌ BAD - Claims to test "no API key" but accepts either outcome
+def test_chat_no_api_key(self):
+    result = self.runner.invoke(cli, ["chat", "test"])
+    assert result.exit_code in [0, 1]  # This tests NOTHING
+
+# ❌ BAD - Claims to test specific status but accepts multiple
+def test_api_status(self):
+    data = get_status()
+    assert data["status"] in ["ready", "error", "pending"]  # Meaningless
+```
+
+### 2. Trivial Tests
+
+Tests that don't verify meaningful behavior:
+
+```python
+# ❌ BAD - Just checks a constant
+def test_config_dir(self):
+    assert settings.config_dir.name == ".brynhild"  # Trivial
+
+# ❌ BAD - Only checks not None
+def test_find_root(self):
+    result = find_root()
+    assert result is not None  # Doesn't verify correctness
+```
+
+#### Simple ≠ Trivial
+
+- **Trivial (BAD)**: Would pass regardless of correctness
+- **Simple (OK)**: Easy to understand but guards a specific requirement
+
+Valid simple test types:
+- **Invariant guards**: Catch accidental breakage (e.g., "registry must include ollama")
+- **Specification tests**: Encode requirements as code (e.g., "default config must have X")
+
+```python
+# ✅ GOOD - Specification test with required documentation
+def test_default_config_has_openrouter(self) -> None:
+    """Default config must include openrouter.
+
+    Requirement: OpenRouter is the default provider.
+    Fails if: openrouter accidentally removed from defaults.
+    """
+    openrouter = settings.providers.get_provider_config("openrouter")
+    assert openrouter is not None
+```
+
+Simple tests must document **Requirement** and **Fails if**.
+
+### 3. Smoke Tests Disguised as Unit Tests
+
+If a test only verifies "doesn't crash", name it honestly:
+
+```python
+# ❌ BAD - Name suggests it tests behavior
+def test_chat_with_prompt(self):
+    result = invoke(["chat", "hello"])
+    assert result.exit_code in [0, 1]  # Just a smoke test
+
+# ✅ OK - Honest name if smoke test is needed
+def test_chat_command_does_not_crash(self):
+    result = invoke(["chat", "hello"])
+    # Explicitly just checking no exception
+```
+
+### 4. Hacky Workarounds
+
+No clever tricks to silence linters or avoid proper fixes:
+
+```python
+# ❌ BAD - Underscore prefix to hide unused argument
+def __init__(self, model: str, **_kwargs: Any) -> None:
+    self._model = model
+
+# ✅ GOOD - Remove if not needed
+def __init__(self, model: str) -> None:
+    self._model = model
+
+# ✅ GOOD - Explicit noqa if intentionally unused (with reason)
+def __init__(self, model: str, **kwargs: Any) -> None:  # noqa: ARG002 - API compat
+    self._model = model
+```
+
+If lint complains about something, either:
+1. Fix the underlying issue
+2. Use explicit `# noqa: XXXX` with a reason comment
+3. Never use underscore prefixes or other tricks to hide problems
+
+## Required Test Patterns
+
+### 1. Test Specific Behavior
+
+```python
+# ✅ GOOD - Tests specific expected outcome
+def test_chat_fails_without_api_key(self):
+    """With no API key configured, chat should fail with clear error."""
+    with mock.patch.dict(os.environ, {}, clear=True):
+        settings = Settings(_env_file=None)
+        result = invoke(["chat", "hello"])
+        assert result.exit_code == 1
+        assert "No API key" in result.output
+```
+
+### 2. Test Edge Cases Meaningfully
+
+```python
+# ✅ GOOD - Verifies actual fallback behavior
+def test_find_project_root_falls_back_to_cwd(self, tmp_path):
+    """When no markers found, should return the starting directory."""
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    result = find_project_root(empty_dir)
+    assert result == empty_dir  # Specific assertion
+```
+
+### 3. Isolate External Dependencies
+
+```python
+# ✅ GOOD - Properly isolated from environment
+def test_settings_default_provider(self):
+    """Default provider should be anthropic when env is clean."""
+    with mock.patch.dict(os.environ, {}, clear=True):
+        settings = Settings(_env_file=None)  # Disable .env loading
+        assert settings.provider == "anthropic"
+```
+
+## When to Delete vs Fix
+
+- **Delete** if the test provides no value even when fixed
+- **Fix** if the test covers important behavior but is poorly written
+- **Never** keep a test that passes for the wrong reasons
+
+## Test Naming
+
+Test names should describe:
+1. What is being tested
+2. The condition/scenario
+3. The expected outcome
+
+```python
+# ✅ GOOD names
+def test_session_save_creates_json_file(self):
+def test_load_nonexistent_session_returns_none(self):
+def test_chat_without_api_key_exits_with_error(self):
+
+# ❌ BAD names
+def test_save(self):
+def test_error(self):
+def test_it_works(self):
+```

@@ -1,0 +1,130 @@
+---
+description: Prevents autonomous git commits - all git changes require explicit user authorization
+alwaysApply: true
+---
+
+# No Autonomous Git Commits
+
+## CRITICAL: Never Make Git Commits Without Explicit Authorization
+
+The AI agent **MUST NOT** make autonomous changes to the git repository. All git operations that modify the `.git` database require explicit user authorization.
+
+**This includes scripts and tools that execute git commands** — using `commit-helper execute`, release scripts, or any wrapper around git is the same as running git directly.
+
+## What Counts as "Explicit Authorization"
+
+✅ **These ARE explicit authorization:**
+- "Execute the commit plan"
+- "Commit these changes"
+- "Run commit-helper execute"
+- "Stage and commit the files"
+- "Yes, make that commit"
+
+❌ **These are NOT authorization for git operations:**
+- "Continue" / "Proceed" / "Go ahead" (workflow progression)
+- "Great" / "Looks good" (approval of code, not commits)
+- "Begin phase X" / "Start working on Y" (start coding, not committing)
+- Completing a todo item (task completion ≠ commit approval)
+
+**Why this matters:** Words like "continue" feel like blanket approval to keep executing a plan, but the user means "continue the code work," not "execute all remaining steps including commits." When in doubt, stop and ask.
+
+## Forbidden Operations (Without Explicit User Request)
+
+**NEVER autonomously execute any of these:**
+
+```bash
+# ❌ FORBIDDEN - committing changes
+git commit
+git commit -m "..."
+git commit -am "..."
+git commit --amend
+
+# ❌ FORBIDDEN - staging changes for commit
+git add .
+git add -A
+git add <file>
+
+# ❌ FORBIDDEN - branch modifications
+git checkout -b <branch>
+git branch -d <branch>
+git merge <branch>
+git rebase <branch>
+
+# ❌ FORBIDDEN - remote operations
+git push
+git push origin <branch>
+git push --force
+
+# ❌ FORBIDDEN - history modifications
+git reset
+git reset --hard
+git revert
+git cherry-pick
+
+# ❌ FORBIDDEN - stash operations
+git stash
+git stash pop
+git stash drop
+
+# ❌ FORBIDDEN - tag operations
+git tag <name>
+git tag -d <name>
+```
+
+## Allowed Operations (Read-Only)
+
+**These are safe and allowed without explicit permission:**
+
+```bash
+# ✅ ALLOWED - read-only operations
+git status
+git log
+git log --oneline
+git diff
+git diff --staged
+git show
+git branch
+git branch -a
+git remote -v
+git ls-files
+git rev-parse HEAD
+git rev-parse --show-toplevel
+```
+
+## When the User Wants to Commit
+
+If the user wants to make commits, they will either:
+
+1. **Do it themselves** - The user will run git commands directly
+2. **Work with the agent explicitly** - The user will say something like:
+   - "Let's commit these changes"
+   - "Create a commit with message X"
+   - "Stage and commit the files we changed"
+   - "Help me commit this"
+
+Only when the user **explicitly requests** git modifications should the agent propose or execute git write commands.
+
+**⚠️ This project uses commit plans.** Before creating any commit plan, read `.cursor/rules/commit-plans.mdc` for the workflow and constraints (e.g., each file can only appear in ONE commit, private/public repos must match).
+
+## Proposing vs Executing
+
+Even when the user requests git operations:
+
+1. **Prefer proposing** the git command for user review before execution
+2. **Explain** what the command will do
+3. **Wait for confirmation** before executing if there's any ambiguity
+
+## History Rewriting Requires Extra Care
+
+Commands that rewrite history (`--amend`, `rebase`, `reset`, `force push`) are **especially dangerous** because they can't be easily undone and affect shared history.
+
+Even with explicit user authorization:
+1. **Explain exactly what will change** before executing
+2. **Never "fix" a previous commit reflexively** — discuss first
+3. **Consider alternatives** (new commit vs amend)
+
+## Summary
+
+**The single most important rule**: Never modify `.git` or run git commands that change repository state without explicit user authorization. Read-only git commands are always fine.
+
+**Corollary**: Workflow words ("continue", "proceed", "great") are not git authorization. Only explicit references to commits/staging/pushing count.

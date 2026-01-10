@@ -1,0 +1,53 @@
+---
+alwaysApply: true
+globs: ["**/*.md"]
+description: All markdown files must have YAML frontmatter
+---
+
+# Markdown Frontmatter Requirement
+
+**All markdown files MUST begin with YAML frontmatter.**
+
+## Required Format
+
+```markdown
+---
+title: Document Title
+date: YYYY-MM-DD
+status: draft | discussion | active | archived
+---
+
+# Document Title
+
+Content starts here...
+```
+
+## Minimum Fields
+
+- `title` — Document title (required)
+- `date` — Creation date in YYYY-MM-DD format (required)
+
+## Optional Fields
+
+- `status` — Document lifecycle: `draft`, `discussion`, `active`, `archived`
+- `author` — Who wrote it
+- `tags` — Categorization tags as a list
+
+## Example
+
+```markdown
+---
+title: Template Wrapper Design
+date: 2026-01-08
+status: discussion
+---
+
+# Template Wrapper Design
+
+This document describes...
+```
+
+## Exceptions
+
+- `README.md` files may omit frontmatter (they serve as directory indices)
+- `CHANGELOG.md` and `CONTRIBUTING.md` at repo root may omit frontmatter

@@ -1,0 +1,188 @@
+---
+description: Import style and coding conventions - use qualified imports, no 'from X import Y'
+globs: "**/*.py"
+alwaysApply: true
+---
+# Coding Standards
+
+## Import Style
+
+**Never import symbols directly into the namespace.** Always use qualified imports.
+
+### The Rule
+
+```python
+# ❌ FORBIDDEN - pollutes namespace with imported symbols
+from pathlib import Path
+from typing import Any, Dict
+from tools.python_sandbox import Tool
+
+# ✅ CORRECT - qualified imports
+import pathlib as _pathlib       # External: underscore prefix
+import typing as _typing         # External: underscore prefix
+import tools.python_sandbox as python_sandbox  # Internal: NO underscore
+
+# Then use qualified names
+path: _pathlib.Path = _pathlib.Path("/tmp")
+data: _typing.Dict[str, _typing.Any] = {}
+tool = python_sandbox.Tool()
+```
+
+### Why This Convention
+
+1. **Explicit provenance** - Always clear where a symbol comes from
+2. **No namespace pollution** - Module namespace only contains what's defined there
+3. **Easier refactoring** - Grep-friendly, easy to find all uses of a module
+4. **Avoids shadowing** - Can't accidentally shadow builtins or other names
+
+## External vs Internal Imports
+
+**Key distinction:**
+- **External imports** (stdlib, third-party): Use underscore prefix (`_`)
+- **Internal imports** (tools.*, tests.*): NO underscore prefix
+
+This makes it immediately clear what's part of our codebase vs external dependencies.
+
+### External: Standard Library
+
+```python
+# ✅ CORRECT - underscore prefix for stdlib
+import os as _os
+import sys as _sys
+import json as _json
+import pathlib as _pathlib
+import typing as _typing
+import dataclasses as _dataclasses
+import subprocess as _subprocess
+import asyncio as _asyncio
+import unittest.mock as _mock
+from collections import abc as _abc  # Exception: submodule access
+
+# Usage
+_pathlib.Path("/tmp")
+_typing.Optional[str]
+_json.dumps(data)
+```
+
+### External: Third-Party Packages
+
+```python
+# ✅ CORRECT - underscore prefix for third-party
+import click as _click
+import pydantic as _pydantic
+import httpx as _httpx
+import pytest as _pytest
+
+# Usage
+@_click.command()
+def main() -> None:
+    pass
+
+class Config(_pydantic.BaseModel):
+    pass
+```
+
+### Internal: Plugin Packages
+
+```python
+# ✅ CORRECT - NO underscore for internal plugin imports
+import tools.python_sandbox as python_sandbox
+
+# Usage - clean names for internal code
+tool = python_sandbox.Tool()
+result = await tool.execute({"code": "2+2"})
+```
+
+### Why Different Prefixes?
+
+| Import Type | Prefix | Example | Rationale |
+|-------------|--------|---------|-----------|
+| External (stdlib) | `_` | `_json` | Signals "from outside project" |
+| External (third-party) | `_` | `_click` | Signals "from outside project" |
+| Internal (tools.*) | none | `python_sandbox` | Clean names for our own code |
+
+1. **Visual distinction** - Immediately see external vs internal dependencies
+2. **Semantic meaning** - Underscore = "imported from outside this project"
+3. **Cleaner internal code** - You work with internal modules most, so they get cleaner names
+
+### Exception: `__all__` Exports
+
+In `__init__.py` files that define public APIs, you may import for re-export:
+
+```python
+# In tools/__init__.py - this is acceptable for public API
+from tools.python_sandbox import Tool
+
+__all__ = ["Tool"]
+```
+
+### Exception: Type Checking Imports
+
+For type annotations that are only used at type-check time:
+
+```python
+import typing as _typing
+
+if _typing.TYPE_CHECKING:
+    # These are only used for type hints, never at runtime
+    import some_heavy_module as _heavy
+```
+
+## Complete Example
+
+```python
+"""Example module showing proper import style."""
+
+# Standard library - underscore prefix
+import json as _json
+import pathlib as _pathlib
+import typing as _typing
+
+# Third-party - underscore prefix
+import click as _click
+
+# Internal tools - NO underscore
+import tools.python_sandbox as python_sandbox
+
+
+def run_code(code: str) -> _typing.Optional[str]:
+    """Run Python code in the sandbox."""
+    tool = python_sandbox.Tool()
+    # ... implementation
+```
+
+## Other Standards
+
+### Type Hints
+
+Always use type hints for function signatures:
+
+```python
+def process_data(
+    input_path: _pathlib.Path,
+    options: _typing.Dict[str, _typing.Any],
+) -> _typing.Optional[str]:
+    ...
+```
+
+### Docstrings
+
+Use Google-style docstrings:
+
+```python
+def function(arg1: str, arg2: int) -> bool:
+    """Short description.
+
+    Longer description if needed.
+
+    Args:
+        arg1: Description of arg1.
+        arg2: Description of arg2.
+
+    Returns:
+        Description of return value.
+
+    Raises:
+        ValueError: When something is wrong.
+    """
+```
