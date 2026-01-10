@@ -71,17 +71,26 @@ function ensureDir(pyodide: any, absPath: string): void {
 }
 
 function buildPythonWrapper(code: string, pythonpath: string[]): string {
-  const codeJson = JSON.stringify(code);
-  const pathJson = JSON.stringify(pythonpath ?? []);
+  // P0-B: Use base64 encoding to avoid string delimiter issues.
+  // Raw triple-quotes (r'''...''') break if code contains ''' itself.
+  // Base64 is safe for any content including triple quotes, backslashes, etc.
+  
+  // Handle Unicode: encode to UTF-8 bytes, then base64
+  const encoder = new TextEncoder();
+  const codeBytes = encoder.encode(code);
+  const pathBytes = encoder.encode(JSON.stringify(pythonpath ?? []));
+  
+  // Convert Uint8Array to base64
+  const codeB64 = btoa(String.fromCharCode(...codeBytes));
+  const pathB64 = btoa(String.fromCharCode(...pathBytes));
 
   // Capture stdout/stderr and (REPL-like) final expression value.
   // Returns a JSON string as the final expression.
-  // Note: We use Python raw strings (r'''...''') to preserve JSON escaping
   return `
-import ast, contextlib, io, json, sys, traceback
+import ast, base64, contextlib, io, json, sys, traceback
 
-_code = json.loads(r'''${codeJson}''')
-_pythonpath = json.loads(r'''${pathJson}''')
+_code = base64.b64decode("${codeB64}").decode("utf-8")
+_pythonpath = json.loads(base64.b64decode("${pathB64}").decode("utf-8"))
 
 _stdout = io.StringIO()
 _stderr = io.StringIO()

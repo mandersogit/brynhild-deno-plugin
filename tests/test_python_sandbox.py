@@ -312,3 +312,81 @@ class TestSecurityLimitations:
         # Should get FileNotFoundError or PermissionError
         assert "Error" in (result.error or result.output)
 
+
+class TestP0Fixes:
+    """Tests for P0 audit fixes (critical security/correctness issues)."""
+
+    def test_triple_quotes_in_code(self, tool):
+        # P0-B: Code containing triple quotes should work (base64 encoding).
+        # Using string concatenation to avoid syntax issues in the test itself.
+        code = (
+            "def greet(name):\n"
+            '    """A function with a docstring."""\n'
+            '    return f"Hello, {name}!"\n'
+            "\n"
+            'greet("World")'
+        )
+        result = run_async(tool.execute({"code": code}))
+        assert result.success is True
+        assert "Hello, World" in result.output
+
+    def test_triple_single_quotes_in_string(self, tool):
+        # P0-B: String containing ''' should work.
+        code = "x = \"This string has triple single quotes: '''\"; x"
+        result = run_async(tool.execute({"code": code}))
+        assert result.success is True
+        assert "'''" in result.output
+
+    def test_triple_single_quote_string_literal(self, tool):
+        # P0-B: Actual ''' as Python string delimiters - this is what broke before.
+        # The old r'''${json}''' wrapper would terminate early on this.
+        code = "x = '''multi\nline\nstring'''; x"
+        result = run_async(tool.execute({"code": code}))
+        assert result.success is True
+        assert "multi" in result.output
+
+    def test_unicode_in_code(self, tool):
+        """P0-B: Unicode characters in code should work."""
+        code = '''
+# Comment with émojis: 🐍🎉
+greeting = "Héllo Wörld! 你好世界 🌍"
+greeting
+'''
+        result = run_async(tool.execute({"code": code}))
+        assert result.success is True
+        assert "Héllo" in result.output or "Hello" in result.output  # May normalize
+
+    def test_backslashes_in_code(self, tool):
+        """P0-B: Backslashes should be preserved correctly."""
+        code = r'''
+import re
+pattern = r"\d+\.\d+"
+re.findall(pattern, "3.14 and 2.71")
+'''
+        result = run_async(tool.execute({"code": code}))
+        assert result.success is True
+        assert "3.14" in result.output
+
+    def test_timeout_recovery(self, tool):
+        """P0-A: After timeout, subsequent calls should work (process recovered)."""
+        import time
+        
+        # First call: infinite loop that will timeout
+        start = time.time()
+        result1 = run_async(tool.execute({
+            "code": "while True: pass",
+            "timeout_ms": 1000  # 1 second timeout
+        }))
+        elapsed = time.time() - start
+        
+        assert result1.success is False
+        assert "timed out" in (result1.error or "").lower()
+        assert "1000ms" in (result1.error or "")  # Should mention the timeout value
+        # Should have taken at least ~1 second but not much more
+        assert 0.8 < elapsed < 5.0, f"Timeout took unexpected time: {elapsed}s"
+
+        # Second call: should work because process was killed and respawned
+        result2 = run_async(tool.execute({"code": "2 + 2"}))
+        assert result2.success is True
+        assert "4" in result2.output
+

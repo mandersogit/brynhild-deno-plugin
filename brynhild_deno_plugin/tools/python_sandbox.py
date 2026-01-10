@@ -335,16 +335,16 @@ class Tool(ToolBase):
 
             # Read one response line with timeout
             assert proc.stdout is not None
-            raw = await _asyncio.wait_for(proc.stdout.readline(), timeout=timeout_ms / 1000.0)
+            try:
+                raw = await _asyncio.wait_for(proc.stdout.readline(), timeout=timeout_ms / 1000.0)
+            except _asyncio.TimeoutError:
+                # P0-A: Force-kill on timeout to prevent wedged subprocess
+                await self._force_kill_proc_locked()
+                raise
 
             if not raw:
-                # Process died unexpectedly; read stderr for details.
-                err = ""
-                if proc.stderr is not None:
-                    try:
-                        err = (await proc.stderr.read()).decode("utf-8", errors="replace")
-                    except Exception:
-                        err = ""
+                # Process died unexpectedly; read stderr for details (bounded, with timeout).
+                err = await self._read_stderr_bounded(proc)
                 await self._kill_proc_locked()
                 raise RuntimeError(f"Deno runner exited unexpectedly. stderr:\n{err.strip()}")
 
@@ -352,13 +352,8 @@ class Tool(ToolBase):
             try:
                 return _json.loads(text)
             except _json.JSONDecodeError:
-                # Try to read additional stderr context
-                err = ""
-                if proc.stderr is not None:
-                    try:
-                        err = (await proc.stderr.read()).decode("utf-8", errors="replace")
-                    except Exception:
-                        err = ""
+                # Try to read additional stderr context (bounded, with timeout)
+                err = await self._read_stderr_bounded(proc)
                 raise RuntimeError(f"Runner returned non-JSON output: {text[:200]}\n\nstderr:\n{err[:500]}")
 
     async def _spawn_proc_locked(self, *, memory_mb: int) -> _asyncio.subprocess.Process:
@@ -400,19 +395,63 @@ class Tool(ToolBase):
         )
         return proc
 
-    async def _kill_proc_locked(self) -> None:
+    async def _read_stderr_bounded(self, proc: _asyncio.subprocess.Process, max_bytes: int = 8192) -> str:
+        """Read stderr with bounded size and timeout to prevent hangs (P0-C)."""
+        if proc.stderr is None:
+            return ""
+        try:
+            data = await _asyncio.wait_for(proc.stderr.read(max_bytes), timeout=0.5)
+            return data.decode("utf-8", errors="replace")
+        except _asyncio.TimeoutError:
+            return "(stderr read timed out)"
+        except Exception:
+            return ""
+
+    async def _force_kill_proc_locked(self) -> None:
+        """Force-kill subprocess without risking hang (P0-A).
+        
+        This is called on timeout - we must not wait for graceful shutdown
+        because the process may be wedged (e.g., infinite loop).
+        """
         if self._proc is None:
             return
         proc = self._proc
         self._proc = None
         self._proc_memory_mb = None
 
+        # Immediately kill - no graceful shutdown attempt
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass  # Already dead
+        except Exception:
+            pass
+
+        # Brief wait for cleanup, then abandon
+        try:
+            await _asyncio.wait_for(proc.wait(), timeout=1.0)
+        except _asyncio.TimeoutError:
+            pass  # Orphaned but we've moved on
+        except Exception:
+            pass
+
+    async def _kill_proc_locked(self) -> None:
+        """Gracefully kill subprocess with timeout protection (P0-C)."""
+        if self._proc is None:
+            return
+        proc = self._proc
+        self._proc = None
+        self._proc_memory_mb = None
+
+        # Try graceful shutdown, but with timeout to prevent hang
         try:
             if proc.stdin is not None and not proc.stdin.is_closing():
                 try:
-                    # Ask runner to exit cleanly (best effort)
                     proc.stdin.write(b'{"shutdown": true}\n')
-                    await proc.stdin.drain()
+                    # P0-C: Add timeout to drain() to prevent hang if process not reading
+                    await _asyncio.wait_for(proc.stdin.drain(), timeout=0.5)
+                except _asyncio.TimeoutError:
+                    pass  # Process not reading, proceed to kill
                 except Exception:
                     pass
                 try:
