@@ -1,0 +1,22 @@
+Third-Party Licenses for brynhild-deno-plugin
+=============================================
+
+This plugin vendors the following third-party components:
+
+1. Pyodide (vendor/pyodide/)
+   - License: Mozilla Public License 2.0 (MPL-2.0)
+   - Source: https://github.com/pyodide/pyodide
+   - Full license: LICENSES/PYODIDE-MPL2.txt
+
+2. Deno (runtime dependency, not vendored)
+   - License: MIT
+   - Source: https://github.com/denoland/deno
+   - Full license: LICENSES/DENO-MIT.txt
+
+3. CPython/Python Standard Library (embedded in Pyodide)
+   - License: Python Software Foundation License
+   - Source: https://github.com/python/cpython
+   - Full license: LICENSES/PYTHON-PSF.txt
+
+The plugin code itself (tools/, deno/, scripts/) is licensed under MIT.
+See the root LICENSE file.
