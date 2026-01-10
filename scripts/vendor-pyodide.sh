@@ -2,7 +2,7 @@
 #
 # vendor-pyodide.sh — Download and vendor Pyodide for air-gapped deployment
 #
-# Run this ONCE on a machine with network access, then commit vendor/ to the repo.
+# Run this ONCE on a machine with network access, then commit brynhild_deno_plugin/vendor/ to the repo.
 #
 # Usage:
 #   ./scripts/vendor-pyodide.sh
@@ -12,10 +12,10 @@
 set -euo pipefail
 
 # Configuration
-PYODIDE_VERSION="${PYODIDE_VERSION:-0.27.0}"
+PYODIDE_VERSION="${PYODIDE_VERSION:-0.29.1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
-VENDOR_DIR="$PLUGIN_ROOT/vendor"
+VENDOR_DIR="$PLUGIN_ROOT/brynhild_deno_plugin/vendor"
 PYODIDE_DIR="$VENDOR_DIR/pyodide"
 LICENSES_DIR="$VENDOR_DIR/LICENSES"
 
@@ -144,7 +144,7 @@ echo
 success "Ready for offline use!"
 echo
 echo "Next steps:"
-echo "  1. git add vendor/"
+echo "  1. git add brynhild_deno_plugin/vendor/"
 echo "  2. git commit -m 'Vendor Pyodide $PYODIDE_VERSION'"
 echo "  3. python scripts/smoke_test.py"
 echo
