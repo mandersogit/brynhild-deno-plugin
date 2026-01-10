@@ -23,10 +23,10 @@ The plugin registers as a Brynhild entry point:
 
 ```bash
 # Install alongside brynhild
-pip install brynhild git+https://github.com/brynhild/brynhild-deno-plugin.git
+pip install brynhild git+https://github.com/mandersogit/brynhild-deno-plugin.git
 
 # Or for development
-git clone https://github.com/brynhild/brynhild-deno-plugin.git
+git clone https://github.com/mandersogit/brynhild-deno-plugin.git
 pip install -e ./brynhild-deno-plugin
 ```
 
@@ -35,7 +35,7 @@ Brynhild will automatically discover the plugin via entry points.
 ### Option B: Clone only
 
 ```bash
-git clone https://github.com/brynhild/brynhild-deno-plugin.git
+git clone https://github.com/mandersogit/brynhild-deno-plugin.git
 cd brynhild-deno-plugin
 ```
 
@@ -84,16 +84,16 @@ brynhild chat "Use python_sandbox to compute factorial(10)"
 
 ### Input Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `code` | string | (required) | Python code to execute |
-| `files` | object | `{}` | Map of path → content to inject into `/work/` |
-| `packages` | array | `[]` | Pyodide packages to load |
-| `pythonpath` | array | `[]` | Paths to add to `sys.path` |
-| `timeout_ms` | integer | `30000` | Execution timeout (ms) |
-| `memory_mb` | integer | `512` | V8 heap limit (MB) |
-| `reset` | boolean | `false` | Clear sandbox state before execution |
-| `format` | string | `"text"` | Output format: `"text"` or `"json"` |
+| Parameter    | Type    | Default    | Description                                   |
+|--------------|---------|------------|-----------------------------------------------|
+| `code`       | string  | (required) | Python code to execute                        |
+| `files`      | object  | `{}`       | Map of path → content to inject into `/work/` |
+| `packages`   | array   | `[]`       | Reserved (no packages vendored in v0.1)       |
+| `pythonpath` | array   | `[]`       | Paths to add to `sys.path`                    |
+| `timeout_ms` | integer | `30000`    | Execution timeout (ms)                        |
+| `memory_mb`  | integer | `512`      | V8 heap limit (MB)                            |
+| `reset`      | boolean | `false`    | Clear sandbox state before execution          |
+| `format`     | string  | `"text"`   | Output format: `"text"` or `"json"`           |
 
 ### Output
 
@@ -133,12 +133,12 @@ Defense-in-depth approach:
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BRYNHILD_PYODIDE_DENO` | `deno` | Path to Deno executable |
-| `BRYNHILD_PYODIDE_TIMEOUT_MS` | `30000` | Default timeout |
-| `BRYNHILD_PYODIDE_MEMORY_MB` | `512` | Default memory limit |
-| `BRYNHILD_PYODIDE_ALLOW_NET` | `false` | Enable network access |
+| Variable                              | Default | Description             |
+|---------------------------------------|---------|-------------------------|
+| `BRYNHILD_PYODIDE_DENO`               | `deno`  | Path to Deno executable |
+| `BRYNHILD_PYODIDE_TIMEOUT_MS`         | `30000` | Default timeout         |
+| `BRYNHILD_PYODIDE_MEMORY_MB`          | `512`   | Default memory limit    |
+| `BRYNHILD_PYODIDE_ALLOW_NET`          | `false` | Enable network access   |
 | `BRYNHILD_PYODIDE_REQUIRE_PERMISSION` | `false` | Prompt before execution |
 
 ## Project Structure
