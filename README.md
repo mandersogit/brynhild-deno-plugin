@@ -126,8 +126,12 @@ Defense-in-depth approach:
 1. **WebAssembly isolation** — Pyodide runs Python in WASM, sandboxed by design
 2. **Deno permissions** — Process runs with:
    - `--no-remote` — No network for module loading
-   - `--allow-read` — Only plugin directory (vendored files)
+   - `--allow-read` — Limited to runner.ts + vendor/pyodide only
    - No `--allow-write`, `--allow-env`, `--allow-run`
+3. **Resource limits** — Built-in protection against abuse:
+   - Output truncation at 10,000 characters (at source)
+   - Max 100 files per request, 1MB per file, 10MB total
+   - Request size limit of 1MB
 3. **Tool-side timeout** — Kills runaway processes
 4. **Memory limits** — V8 heap cap (best-effort)
 
@@ -147,8 +151,7 @@ Defense-in-depth approach:
 brynhild-deno-plugin/
 ├── pyproject.toml                 # Python package config + entry points
 ├── brynhild_deno_plugin/          # Main package (installed via pip)
-│   ├── __init__.py                # Entry point registration
-│   ├── plugin.yaml                # Brynhild plugin manifest
+│   ├── __init__.py                # Entry point registration + manifest
 │   ├── deno/
 │   │   └── runner.ts              # Deno/Pyodide runner (stdin/stdout JSON)
 │   ├── tools/
