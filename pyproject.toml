@@ -19,8 +19,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
-# No runtime dependencies - brynhild provides ToolResult/Tool base
-dependencies = []
+# Declare brynhild as runtime dependency (0.2.0 has full entry-point support)
+dependencies = [
+    "brynhild>=0.2.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -30,6 +32,9 @@ dev = [
 
 [project.entry-points."brynhild.plugins"]
 deno-sandbox = "brynhild_deno_plugin:register"
+
+[project.entry-points."brynhild.tools"]
+python_sandbox = "brynhild_deno_plugin.tools.python_sandbox:Tool"
 
 [build-system]
 requires = ["hatchling"]

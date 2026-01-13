@@ -26,23 +26,8 @@ import pathlib as _pathlib
 import shutil as _shutil
 import typing as _typing
 
-# Import from brynhild when available, use stubs for standalone testing
-try:
-    import brynhild.tools.base as _base
-
-    ToolResult = _base.ToolResult
-    ToolBase = _base.Tool
-except ImportError:  # pragma: no cover
-    import dataclasses as _dataclasses
-
-    @_dataclasses.dataclass
-    class ToolResult:  # type: ignore[no-redef]
-        success: bool
-        output: str
-        error: str | None = None
-
-    class ToolBase:  # type: ignore[no-redef]
-        pass
+# brynhild is a required dependency - import directly
+import brynhild.tools.base as _base
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -56,7 +41,7 @@ def _clamp_int(value: int, *, lo: int, hi: int) -> int:
     return max(lo, min(hi, value))
 
 
-class Tool(ToolBase):
+class Tool(_base.Tool):
     """Sandboxed Python execution using Deno + Pyodide."""
 
     def __init__(self) -> None:
@@ -157,10 +142,11 @@ class Tool(ToolBase):
 
     @property
     def requires_permission(self) -> bool:
-        # This tool intentionally runs with no host filesystem/network access.
-        # In most workflows you want it to be frictionless.
+        # The tool runs in a WASM sandbox with no host filesystem/network access,
+        # so it's safe to run without permission prompts by default.
         #
-        # Set BRYNHILD_PYODIDE_REQUIRE_PERMISSION=true if you want prompts.
+        # Sandbox is safe by design (WebAssembly isolation), so no permission needed.
+        # Set BRYNHILD_PYODIDE_REQUIRE_PERMISSION=true to enable prompts if desired.
         return _env_bool("BRYNHILD_PYODIDE_REQUIRE_PERMISSION", default=False)
 
     # Optional (new in Brynhild 0.2.0): classify risk and recovery behavior
@@ -172,41 +158,41 @@ class Tool(ToolBase):
     def recovery_policy(self) -> str:
         return "allow"
 
-    async def execute(self, input: dict[str, _typing.Any]) -> ToolResult:
+    async def execute(self, input: dict[str, _typing.Any]) -> _base.ToolResult:
         code = input.get("code")
         if not isinstance(code, str) or not code.strip():
-            return ToolResult(success=False, output="", error="code is required and must be a non-empty string")
+            return _base.ToolResult(success=False, output="", error="code is required and must be a non-empty string")
 
         timeout_ms = input.get("timeout_ms", self._default_timeout_ms)
         if not isinstance(timeout_ms, int):
-            return ToolResult(success=False, output="", error="timeout_ms must be an integer")
+            return _base.ToolResult(success=False, output="", error="timeout_ms must be an integer")
         timeout_ms = _clamp_int(timeout_ms, lo=1, hi=600_000)
 
         memory_mb = input.get("memory_mb", self._default_memory_mb)
         if not isinstance(memory_mb, int):
-            return ToolResult(success=False, output="", error="memory_mb must be an integer")
+            return _base.ToolResult(success=False, output="", error="memory_mb must be an integer")
         memory_mb = _clamp_int(memory_mb, lo=16, hi=4096)
 
         reset = bool(input.get("reset", False))
         fmt = input.get("format", "text")
         if fmt not in ("text", "json"):
-            return ToolResult(success=False, output="", error="format must be 'text' or 'json'")
+            return _base.ToolResult(success=False, output="", error="format must be 'text' or 'json'")
 
         files = input.get("files") or {}
         if not isinstance(files, dict):
-            return ToolResult(success=False, output="", error="files must be an object (mapping path -> content)")
+            return _base.ToolResult(success=False, output="", error="files must be an object (mapping path -> content)")
         # Ensure all file values are strings (runner will coerce, but be strict here).
         for k, v in files.items():
             if not isinstance(k, str) or not isinstance(v, str):
-                return ToolResult(success=False, output="", error="files must map string paths to string contents")
+                return _base.ToolResult(success=False, output="", error="files must map string paths to string contents")
 
         packages = input.get("packages") or []
         if not isinstance(packages, list) or any(not isinstance(p, str) for p in packages):
-            return ToolResult(success=False, output="", error="packages must be an array of strings")
+            return _base.ToolResult(success=False, output="", error="packages must be an array of strings")
 
         pythonpath = input.get("pythonpath") or []
         if not isinstance(pythonpath, list) or any(not isinstance(p, str) for p in pythonpath):
-            return ToolResult(success=False, output="", error="pythonpath must be an array of strings")
+            return _base.ToolResult(success=False, output="", error="pythonpath must be an array of strings")
 
         payload = {
             "code": code,
@@ -223,19 +209,19 @@ class Tool(ToolBase):
                 reset=reset,
             )
         except FileNotFoundError as e:
-            return ToolResult(
+            return _base.ToolResult(
                 success=False,
                 output="",
                 error=str(e),
             )
         except _asyncio.TimeoutError:
-            return ToolResult(
+            return _base.ToolResult(
                 success=False,
                 output="",
                 error=f"Execution timed out after {timeout_ms}ms (sandbox process was killed).",
             )
         except (RuntimeError, OSError) as e:
-            return ToolResult(
+            return _base.ToolResult(
                 success=False,
                 output="",
                 error=str(e),
@@ -253,7 +239,7 @@ class Tool(ToolBase):
             result = self._truncate(result)
 
         if fmt == "json":
-            return ToolResult(
+            return _base.ToolResult(
                 success=bool(resp.get("ok")),
                 output=_json.dumps(
                     {
@@ -281,7 +267,7 @@ class Tool(ToolBase):
 
         combined = "\n\n".join(blocks).rstrip() + "\n"
 
-        return ToolResult(
+        return _base.ToolResult(
             success=bool(resp.get("ok")),
             output=combined,
             error=(None if resp.get("ok") else (error or "Python execution failed")),
@@ -357,8 +343,10 @@ class Tool(ToolBase):
                 raise RuntimeError(f"Runner returned non-JSON output: {text[:200]}\n\nstderr:\n{err[:500]}")
 
     async def _spawn_proc_locked(self, *, memory_mb: int) -> _asyncio.subprocess.Process:
-        # Allow read access to the entire plugin root (includes vendor/pyodide and deno/)
-        allow_read_path = str(self._plugin_root.resolve())
+        # P1-2.3: Narrow --allow-read to minimum required paths
+        # Only allow reading the runner script and vendored Pyodide files
+        runner_path = str(self._runner_path.resolve())
+        vendor_path = str(self._vendor_pyodide.resolve())
 
         args = [
             self._deno_bin,
@@ -368,7 +356,7 @@ class Tool(ToolBase):
             "--no-lock",
             "--no-remote",  # No network for module loading
             "--unstable-detect-cjs",  # Required for Pyodide's CommonJS files
-            f"--allow-read={allow_read_path}",
+            f"--allow-read={runner_path},{vendor_path}",
             # No --allow-write: vendored mode doesn't need cache writes
         ]
 

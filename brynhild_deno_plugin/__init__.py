@@ -7,6 +7,8 @@ in a WebAssembly sandbox with no host filesystem or network access.
 
 import pathlib as _pathlib
 
+__version__ = "0.1.0"
+
 
 def get_plugin_root() -> _pathlib.Path:
     """Get the root directory of this plugin package."""
@@ -17,11 +19,13 @@ def register():
     """
     Entry point for Brynhild plugin discovery.
 
-    Returns a full Plugin instance with correct paths so tools can be loaded.
-    We return Plugin (not just PluginManifest) because entry point plugins
-    need real filesystem paths to find their tools/ directory.
+    Returns PluginManifest describing the plugin. Brynhild wraps this
+    automatically with a synthetic path for entry-point plugins.
+
+    Tools are discovered via the brynhild.tools entry point in pyproject.toml,
+    not from a tools/ directory scan.
     """
-    # Import here to avoid circular imports and allow standalone use
+    # Import here to avoid circular imports during discovery
     try:
         import brynhild.plugins.manifest as manifest
     except ImportError:
@@ -30,16 +34,11 @@ def register():
             "Install with: pip install brynhild"
         )
 
-    plugin_root = get_plugin_root()
-    manifest_path = plugin_root / "plugin.yaml"
-    plugin_manifest = manifest.load_manifest(manifest_path)
-
-    # Return full Plugin with real path (not synthetic <entry-point>)
-    return manifest.Plugin(
-        manifest=plugin_manifest,
-        path=plugin_root,
+    return manifest.PluginManifest(
+        name="deno-sandbox",
+        version=__version__,
+        description="Sandboxed Python execution using Deno + Pyodide (WebAssembly)",
+        # Tools are registered via brynhild.tools entry point
+        tools=["python_sandbox"],
     )
-
-
-__version__ = "0.1.0"
 
