@@ -390,3 +390,97 @@ re.findall(pattern, "3.14 and 2.71")
         assert result2.success is True
         assert "4" in result2.output
 
+
+class TestP1Fixes:
+    """Tests for P1 audit fixes (important security improvements)."""
+
+    def test_output_truncation_at_source(self, tool):
+        """P1-2.1: Large output should be truncated at source by _LimitedStringIO."""
+        # Generate output larger than 10000 chars (LimitedStringIO limit)
+        # LimitedStringIO limit (10000) is less than python_sandbox._truncate (12000)
+        # so the truncation message remains visible.
+        code = "print('x' * 20000)"
+        result = run_async(tool.execute({"code": code}))
+        assert result.success is True
+        # The key assertion: LimitedStringIO adds this SPECIFIC message
+        # If this message is present, we KNOW truncation happened in the wrapper
+        assert "truncated at source" in result.output
+        # Double-check: output should be bounded
+        assert len(result.output) < 12500  # 10000 + message + formatting overhead
+
+    def test_file_count_limit(self, tool):
+        """P1-2.5: Too many files should be rejected."""
+        # Create 101 files (limit is 100)
+        files = {f"file{i}.txt": "content" for i in range(101)}
+        result = run_async(tool.execute({
+            "code": "1",
+            "files": files
+        }))
+        assert result.success is False
+        assert "too many files" in (result.error or "").lower()
+
+    def test_file_size_limit(self, tool):
+        """P1-2.5: File larger than 1MB should be rejected."""
+        # Create a file larger than 1MB
+        large_content = "x" * (1_000_001)
+        result = run_async(tool.execute({
+            "code": "1",
+            "files": {"large.txt": large_content}
+        }))
+        assert result.success is False
+        assert "too large" in (result.error or "").lower()
+
+
+class TestDenoBoundary:
+    """P1-2.6: Tests that verify Deno permission boundaries."""
+
+    def test_deno_read_outside_allowed_blocked(self, tool):
+        """Deno should not be able to read files outside allowed paths."""
+        # Try to read /etc/passwd via Deno's JS API
+        code = """
+try:
+    from js import Deno
+    result = Deno.readTextFileSync('/etc/passwd')
+    print(f"FAIL: read succeeded, got {len(result)} bytes")
+except Exception as e:
+    print(f"OK: {type(e).__name__}: {str(e)[:100]}")
+"""
+        result = run_async(tool.execute({"code": code}))
+        # Should either fail or print OK (permission denied)
+        assert "FAIL" not in result.output
+        # Either prints OK or the whole thing fails
+        assert result.success is False or "OK:" in result.output
+
+    def test_deno_write_blocked(self, tool):
+        """Deno should not be able to write to host filesystem."""
+        code = """
+try:
+    from js import Deno
+    Deno.writeTextFileSync('/tmp/brynhild_test.txt', 'test')
+    print("FAIL: write succeeded")
+except Exception as e:
+    print(f"OK: {type(e).__name__}")
+"""
+        result = run_async(tool.execute({"code": code}))
+        assert "FAIL" not in result.output
+
+    def test_network_blocked_by_default(self, tool):
+        """Network access should be blocked by default."""
+        # fetch may be available as a symbol but should fail when actually called
+        code = """
+import asyncio
+async def try_fetch():
+    try:
+        from js import fetch
+        # Actually try to fetch - this should fail
+        resp = await fetch('https://example.com')
+        return f"FAIL: fetch succeeded with status {resp.status}"
+    except Exception as e:
+        return f"OK: {type(e).__name__}: {str(e)[:50]}"
+
+print(asyncio.get_event_loop().run_until_complete(try_fetch()))
+"""
+        result = run_async(tool.execute({"code": code}))
+        # Either the fetch call fails or we get a permission error
+        assert "FAIL" not in result.output or result.success is False
+

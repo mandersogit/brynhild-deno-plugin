@@ -86,14 +86,45 @@ function buildPythonWrapper(code: string, pythonpath: string[]): string {
 
   // Capture stdout/stderr and (REPL-like) final expression value.
   // Returns a JSON string as the final expression.
+  // P1-2.1: Use _LimitedStringIO to bound output at source (prevents memory exhaustion)
   return `
 import ast, base64, contextlib, io, json, sys, traceback
 
 _code = base64.b64decode("${codeB64}").decode("utf-8")
 _pythonpath = json.loads(base64.b64decode("${pathB64}").decode("utf-8"))
 
-_stdout = io.StringIO()
-_stderr = io.StringIO()
+# P1-2.1: Bounded output buffer to prevent memory exhaustion
+# Limit set to 10000 chars (less than python_sandbox._max_output_chars=12000)
+# so the truncation message remains visible after Python-side truncation
+class _LimitedStringIO:
+    def __init__(self, limit=10000):
+        self._buf = []
+        self._len = 0
+        self._limit = limit
+        self._truncated = False
+
+    def write(self, s):
+        if self._len >= self._limit:
+            self._truncated = True
+            return len(s)  # Pretend we wrote it
+        take = min(len(s), self._limit - self._len)
+        self._buf.append(s[:take])
+        self._len += take
+        if take < len(s):
+            self._truncated = True
+        return len(s)
+
+    def getvalue(self):
+        result = "".join(self._buf)
+        if self._truncated:
+            result += "\\n... (truncated at source, limit 10000 chars)"
+        return result
+
+    def flush(self):
+        pass  # Required for redirect_stdout compatibility
+
+_stdout = _LimitedStringIO(10000)
+_stderr = _LimitedStringIO(10000)
 _result = None
 _ok = True
 _err = None
@@ -166,9 +197,25 @@ async function main() {
     // ignore
   }
 
+  // P1-2.1: Request size limit to prevent memory exhaustion
+  const MAX_REQUEST_SIZE = 1_000_000; // 1MB
+
   for await (const rawLine of iterLines(Deno.stdin.readable)) {
     const line = rawLine.trim();
     if (!line) continue;
+
+    // P1-2.1: Reject oversized requests before parsing
+    if (line.length > MAX_REQUEST_SIZE) {
+      const resp: Response = {
+        ok: false,
+        stdout: "",
+        stderr: "",
+        result: null,
+        error: `Request too large (${line.length} bytes, max ${MAX_REQUEST_SIZE})`,
+      };
+      console.log(JSON.stringify(resp));
+      continue;
+    }
 
     let req: Request;
     try {
@@ -194,20 +241,72 @@ async function main() {
     const pythonpath = Array.isArray(req?.pythonpath) ? req.pythonpath : [];
     const files = req?.files && typeof req.files === "object" ? req.files : null;
 
+    // P1-2.5: File injection limits
+    const MAX_FILES = 100;
+    const MAX_FILE_SIZE = 1_000_000; // 1MB per file
+    const MAX_TOTAL_SIZE = 10_000_000; // 10MB total
+
+    // Validate and pre-encode files (encode once, use for both validation and writing)
+    let fileError: string | null = null;
+    const encodedFiles: Array<{ path: string; absPath: string; data: Uint8Array }> = [];
+    
+    if (files) {
+      const fileEntries = Object.entries(files);
+      if (fileEntries.length > MAX_FILES) {
+        fileError = `Too many files (${fileEntries.length}, max ${MAX_FILES})`;
+      } else {
+        let totalSize = 0;
+        const encoder = new TextEncoder();
+        for (const [path, content] of fileEntries) {
+          if (!path || path.length === 0) {
+            fileError = "Empty file path";
+            break;
+          }
+          
+          let absPath: string;
+          try {
+            absPath = sanitizeWorkPath(path);
+          } catch (e) {
+            fileError = (e as Error).message;
+            break;
+          }
+          
+          const data = encoder.encode(String(content));
+          if (data.length > MAX_FILE_SIZE) {
+            fileError = `File '${path}' too large (${data.length} bytes, max ${MAX_FILE_SIZE})`;
+            break;
+          }
+          totalSize += data.length;
+          encodedFiles.push({ path, absPath, data });
+        }
+        if (!fileError && totalSize > MAX_TOTAL_SIZE) {
+          fileError = `Total file size too large (${totalSize} bytes, max ${MAX_TOTAL_SIZE})`;
+        }
+      }
+    }
+
+    if (fileError) {
+      const resp: Response = {
+        ok: false,
+        stdout: "",
+        stderr: "",
+        result: null,
+        error: fileError,
+      };
+      console.log(JSON.stringify(resp));
+      continue;
+    }
+
     try {
       // Load requested packages (if present in the Pyodide distribution).
       if (packages.length > 0) {
         await pyodide.loadPackage(packages);
       }
 
-      // Write provided files into /work.
-      if (files) {
-        const encoder = new TextEncoder();
-        for (const [p, content] of Object.entries(files)) {
-          const abs = sanitizeWorkPath(p);
-          ensureDir(pyodide, abs);
-          pyodide.FS.writeFile(abs, encoder.encode(String(content)));
-        }
+      // Write pre-validated files into /work (already encoded, no double-encoding)
+      for (const { absPath, data } of encodedFiles) {
+        ensureDir(pyodide, absPath);
+        pyodide.FS.writeFile(absPath, data);
       }
 
       // Always run in /work.
