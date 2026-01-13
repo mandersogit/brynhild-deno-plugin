@@ -19,9 +19,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
-# Declare brynhild as runtime dependency (0.2.0 has full entry-point support)
 dependencies = [
-    "brynhild>=0.2.0",
+    "brynhild>=0.1.0",
 ]
 
 [project.optional-dependencies]
